@@ -1,3 +1,477 @@
+// // sunRevolveControllerHTML.js - Attach to Sun entity
+// var SunRevolveControllerHTML = pc.createScript('sunRevolveControllerHTML');
+
+// // Sun settings
+// SunRevolveControllerHTML.attributes.add('orbitRadius', {
+//     type: 'number',
+//     default: 15,
+//     title: 'Orbit Radius'
+// });
+
+// SunRevolveControllerHTML.attributes.add('orbitHeight', {
+//     type: 'number',
+//     default: 8,
+//     title: 'Orbit Height'
+// });
+
+// SunRevolveControllerHTML.attributes.add('autoIntensity', {
+//     type: 'boolean',
+//     default: true,
+//     title: 'Auto Adjust Intensity'
+// });
+
+// // Initialize
+// SunRevolveControllerHTML.prototype.initialize = function() {
+//     this.currentSunPosition = 0.5;
+    
+//     // Inject Custom Shaders into all GSplats in the scene
+//     this.setupGSplatShaders();
+    
+//     this.createHTMLUI();
+//     this.updateSunPosition(this.currentSunPosition);
+//     this.updateSliderUI(this.currentSunPosition);
+    
+//     console.log("Sun Controller with HTML UI Ready & GSplats linked!");
+// };
+
+// // --- Setup GSplat Shaders Automatically ---
+// SunRevolveControllerHTML.prototype.setupGSplatShaders = function() {
+//     var gsplats = this.app.root.findComponents('gsplat');
+//     if (gsplats.length === 0) return;
+
+//     const isWebGPU = this.app.graphicsDevice.isWebGPU;
+//     const shaderLanguage = isWebGPU ? 'wgsl' : 'glsl';
+
+//     let customShader = '';
+
+//     if (shaderLanguage === 'glsl') {
+//         customShader = `
+//             uniform vec3 uSunColor;
+//             uniform float uSunIntensity;
+
+//             void modifySplatCenter(inout vec3 center) {}
+            
+//             void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {}
+
+//             void modifySplatColor(vec3 center, inout vec4 color) {
+//                 // Ambient baseline so shadows aren't pitch black
+//                 vec3 ambient = vec3(0.25, 0.25, 0.35); 
+                
+//                 // Combine ambient with FULL sun intensity/color
+//                 vec3 lightEffect = ambient + (uSunColor * max(0.0, uSunIntensity)); 
+                
+//                 color.rgb *= lightEffect;
+//             }
+//         `;
+//     } else {
+//         customShader = `
+//             uniform uSunColor: vec3f;
+//             uniform uSunIntensity: f32;
+
+//             fn modifySplatCenter(center: ptr<function, vec3f>) {}
+            
+//             fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {}
+
+//             fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+//                 let ambient = vec3f(0.25, 0.25, 0.35);
+//                 let lightEffect = ambient + (uniform.uSunColor * max(0.0, uniform.uSunIntensity));
+//                 *color = vec4f((*color).rgb * lightEffect, (*color).a);
+//             }
+//         `;
+//     }
+
+//     // Apply shader to all GSplat materials
+//     for (var i = 0; i < gsplats.length; i++) {
+//         var material = gsplats[i].material;
+//         if (material) {
+//             material.getShaderChunks(shaderLanguage).set('gsplatModifyVS', customShader);
+//             material.update();
+            
+//             // Initialize with default white light so it doesn't flash black
+//             material.setParameter('uSunColor', [1.0, 1.0, 1.0]);
+//             material.setParameter('uSunIntensity', 1.0);
+//         }
+//     }
+// };
+
+// // Create HTML overlay UI
+// SunRevolveControllerHTML.prototype.createHTMLUI = function() {
+//     this.uiContainer = document.createElement('div');
+//     this.uiContainer.id = 'sun-control-ui';
+//     this.uiContainer.style.cssText = `
+//         position: absolute;
+//         bottom: 20px;
+//         left: 20px;
+//         background: rgba(0, 0, 0, 0.7);
+//         color: white;
+//         padding: 15px;
+//         border-radius: 10px;
+//         font-family: Arial, sans-serif;
+//         min-width: 500px;
+//         z-index: 1000;
+//         box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+//     `;
+    
+//     const title = document.createElement('div');
+//     title.textContent = '☀️ SUN POSITION CONTROLLER';
+//     title.style.cssText = `
+//         font-size: 16px;
+//         font-weight: bold;
+//         margin-bottom: 10px;
+//         text-align: center;
+//         color: #FFD700;
+//     `;
+//     this.uiContainer.appendChild(title);
+    
+//     const sliderContainer = document.createElement('div');
+//     sliderContainer.style.cssText = `margin: 15px 0;`;
+    
+//     this.slider = document.createElement('input');
+//     this.slider.type = 'range';
+//     this.slider.min = '0';
+//     this.slider.max = '100';
+//     this.slider.value = '50';
+//     this.slider.style.cssText = `
+//         width: 100%;
+//         height: 10px;
+//         border-radius: 5px;
+//         background: #444;
+//         outline: none;
+//         -webkit-appearance: none;
+//         cursor: pointer;
+//     `;
+    
+//     this.slider.style.background = 'linear-gradient(to right, #FF4500, #FFD700, #FF4500)';
+    
+//     this.slider.addEventListener('input', (e) => {
+//         this.onSliderChanged(parseInt(e.target.value) / 100);
+//     });
+    
+//     this.positionLabel = document.createElement('div');
+//     this.positionLabel.id = 'sun-position-label';
+//     this.positionLabel.textContent = 'NOON (Overhead)';
+//     this.positionLabel.style.cssText = `
+//         font-size: 18px;
+//         font-weight: bold;
+//         text-align: center;
+//         margin: 10px 0;
+//         color: #FFD700;
+//     `;
+    
+//     this.angleLabel = document.createElement('div');
+//     this.angleLabel.id = 'sun-angle-label';
+//     this.angleLabel.textContent = 'Sun Angle: 90°';
+//     this.angleLabel.style.cssText = `
+//         font-size: 14px;
+//         text-align: center;
+//         margin-bottom: 10px;
+//         color: #CCC;
+//     `;
+    
+//     const timeLabels = document.createElement('div');
+//     timeLabels.style.cssText = `
+//         display: flex;
+//         justify-content: space-between;
+//         font-size: 12px;
+//         color: #AAA;
+//         margin-top: 5px;
+//     `;
+    
+//     const sunriseLabel = document.createElement('span');
+//     sunriseLabel.textContent = '🌅 Sunrise';
+//     sunriseLabel.style.color = '#FF6B35';
+    
+//     const noonLabel = document.createElement('span');
+//     noonLabel.textContent = '☀️ Noon';
+//     noonLabel.style.color = '#FFD700';
+    
+//     const sunsetLabel = document.createElement('span');
+//     sunsetLabel.textContent = '🌇 Sunset';
+//     sunsetLabel.style.color = '#FF6B35';
+    
+//     timeLabels.appendChild(sunriseLabel);
+//     timeLabels.appendChild(noonLabel);
+//     timeLabels.appendChild(sunsetLabel);
+    
+//     this.shadowLabel = document.createElement('div');
+//     this.shadowLabel.id = 'shadow-info';
+//     this.shadowLabel.textContent = 'Shadow: Short (Direct)';
+//     this.shadowLabel.style.cssText = `
+//         font-size: 13px;
+//         text-align: center;
+//         margin-top: 10px;
+//         color: #8AC;
+//         font-style: italic;
+//     `;
+    
+//     const resetButton = document.createElement('button');
+//     resetButton.textContent = 'Reset to Noon';
+//     resetButton.style.cssText = `
+//         background: #4A6FA5;
+//         color: white;
+//         border: none;
+//         padding: 8px 16px;
+//         border-radius: 5px;
+//         cursor: pointer;
+//         font-size: 14px;
+//         margin-top: 10px;
+//         width: 100%;
+//         transition: background 0.3s;
+//     `;
+    
+//     resetButton.onmouseover = () => resetButton.style.background = '#5A7FB5';
+//     resetButton.onmouseout = () => resetButton.style.background = '#4A6FA5';
+    
+//     resetButton.onclick = () => {
+//         this.slider.value = '50';
+//         this.onSliderChanged(0.5);
+//     };
+    
+//     sliderContainer.appendChild(this.slider);
+//     sliderContainer.appendChild(timeLabels);
+    
+//     this.uiContainer.appendChild(sliderContainer);
+//     this.uiContainer.appendChild(this.positionLabel);
+//     this.uiContainer.appendChild(this.angleLabel);
+//     this.uiContainer.appendChild(this.shadowLabel);
+//     this.uiContainer.appendChild(resetButton);
+    
+//     document.body.appendChild(this.uiContainer);
+    
+//     const style = document.createElement('style');
+//     style.textContent = `
+//         #sun-control-ui input[type="range"]::-webkit-slider-thumb {
+//             -webkit-appearance: none;
+//             width: 24px;
+//             height: 24px;
+//             border-radius: 50%;
+//             background: #FFD700;
+//             border: 2px solid #FFF;
+//             box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+//             cursor: pointer;
+//         }
+        
+//         #sun-control-ui input[type="range"]::-moz-range-thumb {
+//             width: 24px;
+//             height: 24px;
+//             border-radius: 50%;
+//             background: #FFD700;
+//             border: 2px solid #FFF;
+//             box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+//             cursor: pointer;
+//         }
+        
+//         #sun-control-ui button:hover {
+//             background: #5A7FB5 !important;
+//         }
+        
+//         #sun-control-ui button:active {
+//             transform: scale(0.98);
+//         }
+//     `;
+//     document.head.appendChild(style);
+// };
+
+// SunRevolveControllerHTML.prototype.onSliderChanged = function(value) {
+//     this.currentSunPosition = value;
+//     this.updateSunPosition(value);
+//     this.updateSliderUI(value);
+// };
+
+// SunRevolveControllerHTML.prototype.updateSunPosition = function(sliderValue) {
+//     var orbitAngle = sliderValue * 360;
+//     var radians = orbitAngle * (Math.PI / 180);
+    
+//     var xPos = Math.cos(radians) * this.orbitRadius;
+//     var zPos = Math.sin(radians) * this.orbitRadius;
+    
+//     var sunVerticalAngle;
+//     if (sliderValue <= 0.5) {
+//         sunVerticalAngle = 10 + (sliderValue * 2 * 80);
+//     } else {
+//         var afternoonProgress = (sliderValue - 0.5) * 2;
+//         sunVerticalAngle = 90 - (afternoonProgress * 80);
+//     }
+    
+//     var yPos = Math.tan(sunVerticalAngle * Math.PI / 180) * (Math.sqrt(xPos*xPos + zPos*zPos));
+//     yPos = Math.max(yPos, 2); 
+    
+//     this.entity.setPosition(xPos, yPos, zPos);
+//     this.entity.lookAt(new pc.Vec3(0, 1, 0));
+    
+//     this.updateLightProperties(sliderValue, sunVerticalAngle);
+//     this.updateShadowSettings(sliderValue, sunVerticalAngle);
+// };
+
+// // Update light color and intensity AND send it to GSplats correctly
+// SunRevolveControllerHTML.prototype.updateLightProperties = function(timeOfDay, verticalAngle) {
+//     if (!this.entity.light || !this.autoIntensity) return;
+    
+//     var light = this.entity.light;
+    
+//     // Calculate intensity
+//     var intensity;
+//     if (timeOfDay <= 0.5) {
+//         intensity = 0.5 + (timeOfDay * 2 * 2.0);
+//     } else {
+//         intensity = 2.5 - ((timeOfDay - 0.5) * 2 * 2.0);
+//     }
+//     light.intensity = Math.max(intensity, 0.3);
+    
+//     // Calculate color
+//     var sunHeightFactor = verticalAngle / 90;
+    
+//     if (timeOfDay < 0.5) {
+//         light.color = new pc.Color(
+//             1, 
+//             0.6 + (0.4 * sunHeightFactor), 
+//             0.4 + (0.5 * sunHeightFactor)  
+//         );
+//     } else {
+//         light.color = new pc.Color(
+//             1, 
+//             0.9 - (0.3 * (1 - sunHeightFactor)), 
+//             0.7 - (0.3 * (1 - sunHeightFactor))  
+//         );
+//     }
+
+//     // --- FIX: Sync lighting data correctly to the MATERIAL ---
+//     var gsplats = this.app.root.findComponents('gsplat');
+//     for (var i = 0; i < gsplats.length; i++) {
+//         var material = gsplats[i].material;
+//         if (material) {
+//             material.setParameter('uSunColor', [light.color.r, light.color.g, light.color.b]);
+//             material.setParameter('uSunIntensity', light.intensity);
+//         }
+//     }
+// };
+
+// SunRevolveControllerHTML.prototype.updateShadowSettings = function(timeOfDay, verticalAngle) {
+//     if (!this.entity.light) return;
+    
+//     var light = this.entity.light;
+    
+//     if (verticalAngle < 30) {
+//         light.bias = 0.2;
+//         light.normalOffsetBias = 0.1;
+//         light.shadowDistance = 60;
+//     } else if (verticalAngle < 60) {
+//         light.bias = 0.15;
+//         light.normalOffsetBias = 0.05;
+//         light.shadowDistance = 40;
+//     } else {
+//         light.bias = 0.1;
+//         light.normalOffsetBias = 0.02;
+//         light.shadowDistance = 30;
+//     }
+// };
+
+// SunRevolveControllerHTML.prototype.updateSliderUI = function(timeOfDay) {
+//     if (!this.positionLabel || !this.angleLabel || !this.shadowLabel) return;
+    
+//     var verticalAngle;
+//     if (timeOfDay <= 0.5) {
+//         verticalAngle = 10 + (timeOfDay * 2 * 80);
+//     } else {
+//         var afternoonProgress = (timeOfDay - 0.5) * 2;
+//         verticalAngle = 90 - (afternoonProgress * 80);
+//     }
+    
+//     var positionText, color;
+//     if (timeOfDay < 0.1) {
+//         positionText = "🌅 SUNRISE (East)";
+//         color = "#FF6B35";
+//     } else if (timeOfDay < 0.25) {
+//         positionText = "☀️ MORNING";
+//         color = "#FF8C42";
+//     } else if (timeOfDay < 0.4) {
+//         positionText = "☀️ LATE MORNING";
+//         color = "#FFB347";
+//     } else if (timeOfDay < 0.5) {
+//         positionText = "☀️ NOON (South)";
+//         color = "#FFD700";
+//     } else if (timeOfDay < 0.6) {
+//         positionText = "☀️ EARLY AFTERNOON";
+//         color = "#FFB347";
+//     } else if (timeOfDay < 0.75) {
+//         positionText = "☀️ AFTERNOON";
+//         color = "#FF8C42";
+//     } else if (timeOfDay < 0.9) {
+//         positionText = "🌇 EVENING";
+//         color = "#FF6B35";
+//     } else {
+//         positionText = "🌇 SUNSET (West)";
+//         color = "#FF4500";
+//     }
+    
+//     this.positionLabel.textContent = positionText;
+//     this.positionLabel.style.color = color;
+    
+//     this.angleLabel.textContent = `Sun Angle: ${Math.round(verticalAngle)}°`;
+    
+//     var shadowLength;
+//     var shadowText;
+    
+//     if (verticalAngle > 70) {
+//         shadowLength = "Very Short";
+//         shadowText = "Direct Downward";
+//     } else if (verticalAngle > 45) {
+//         shadowLength = "Short";
+//         shadowText = "Slightly Angled";
+//     } else if (verticalAngle > 20) {
+//         shadowLength = "Medium";
+//         shadowText = "Angled";
+//     } else {
+//         shadowLength = "Long";
+//         shadowText = "Highly Stretched";
+//     }
+    
+//     var direction = timeOfDay < 0.5 ? "Westward" : "Eastward";
+//     this.shadowLabel.textContent = `Shadow: ${shadowLength} (${shadowText}, ${direction})`;
+    
+//     if (timeOfDay < 0.5) {
+//         this.slider.style.background = `linear-gradient(to right, 
+//             #FF4500 0%, 
+//             #FF8C42 ${(timeOfDay*200)}%, 
+//             #FFD700 50%, 
+//             #FF8C42 100%)`;
+//     } else {
+//         this.slider.style.background = `linear-gradient(to right, 
+//             #FF4500 0%, 
+//             #FF8C42 50%, 
+//             #FFD700 ${(50 + (timeOfDay-0.5)*100)}%, 
+//             #FF8C42 100%)`;
+//     }
+// };
+
+// SunRevolveControllerHTML.prototype.destroy = function() {
+//     if (this.uiContainer && this.uiContainer.parentNode) {
+//         this.uiContainer.parentNode.removeChild(this.uiContainer);
+//     }
+// };
+
+// SunRevolveControllerHTML.prototype.update = function(dt) {
+//     if (this.app.keyboard) {
+//         if (this.app.keyboard.wasPressed(pc.KEY_LEFT)) {
+//             this.currentSunPosition = Math.max(0, this.currentSunPosition - 0.01);
+//             this.slider.value = this.currentSunPosition * 100;
+//             this.onSliderChanged(this.currentSunPosition);
+//         }
+//         if (this.app.keyboard.wasPressed(pc.KEY_RIGHT)) {
+//             this.currentSunPosition = Math.min(1, this.currentSunPosition + 0.01);
+//             this.slider.value = this.currentSunPosition * 100;
+//             this.onSliderChanged(this.currentSunPosition);
+//         }
+//         if (this.app.keyboard.wasPressed(pc.KEY_SPACE)) {
+//             this.currentSunPosition = 0.5;
+//             this.slider.value = '50';
+//             this.onSliderChanged(0.5);
+//         }
+//     }
+// };
+
+
+
 
 
 // sunRevolveControllerHTML.js - Attach to Sun entity
