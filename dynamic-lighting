@@ -1,0 +1,232 @@
+
+
+// sunRevolveControllerHTML.js - Attach to Sun entity
+var SunRevolveControllerHTML = pc.createScript('sunRevolveControllerHTML');
+
+SunRevolveControllerHTML.attributes.add('orbitRadius', { type: 'number', default: 15, title: 'Orbit Radius' });
+SunRevolveControllerHTML.attributes.add('autoIntensity', { type: 'boolean', default: true, title: 'Auto Adjust Intensity' });
+
+// Define our beautiful, natural color palette
+SunRevolveControllerHTML.TWILIGHT_COLOR = new pc.Color(1.0, 0.45, 0.25); // Deep cinematic orange/pink
+SunRevolveControllerHTML.NOON_COLOR = new pc.Color(1.0, 0.98, 0.92);     // Crisp, bright daylight
+
+SunRevolveControllerHTML.prototype.initialize = function() {
+    this.currentSunPosition = 0.5;
+    
+    // Inject our Advanced Shader into all GSplats
+    this.setupGSplatShaders();
+    
+    this.createHTMLUI();
+    this.updateSunPosition(this.currentSunPosition);
+    
+    console.log("Cinematic Sun Controller Ready! (Overburn Fixed)");
+};
+
+// --- ADVANCED GSPLAT SHADER (Fixed Overburn) ---
+SunRevolveControllerHTML.prototype.setupGSplatShaders = function() {
+    var gsplats = this.app.root.findComponents('gsplat');
+    if (gsplats.length === 0) return;
+
+    const isWebGPU = this.app.graphicsDevice.isWebGPU;
+    const shaderLanguage = isWebGPU ? 'wgsl' : 'glsl';
+
+    let customShader = '';
+
+    if (shaderLanguage === 'glsl') {
+        customShader = `
+            uniform vec3 uSunColor;
+            uniform float uSunIntensity;
+
+            void modifySplatCenter(inout vec3 center) {}
+            void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {}
+
+            void modifySplatColor(vec3 center, inout vec4 color) {
+                // Dual-tone ambient lighting
+                vec3 skyAmbient = vec3(0.15, 0.20, 0.35);    // Cool twilight blue
+                vec3 groundAmbient = vec3(0.05, 0.05, 0.08); // Darker ground bounce
+                
+                // Fake Ambient Occlusion based on height (Assuming Y=0 is ground level)
+                float heightFactor = clamp(center.y / 8.0, 0.0, 1.0);
+                vec3 baseAmbient = mix(groundAmbient, skyAmbient, heightFactor);
+
+                // FIXED: Multiply intensity by 0.35 so peak noon (2.8) equals a ~1.0 multiplier 
+                // This prevents the GSplat from overburning while keeping shadows sharp elsewhere.
+                vec3 directLight = uSunColor * (max(0.0, uSunIntensity) * 0.35);
+                
+                // Combine and apply
+                vec3 totalLight = baseAmbient + directLight;
+                color.rgb *= totalLight;
+            }
+        `;
+    } else {
+        customShader = `
+            uniform uSunColor: vec3f;
+            uniform uSunIntensity: f32;
+
+            fn modifySplatCenter(center: ptr<function, vec3f>) {}
+            fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {}
+
+            fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+                let skyAmbient = vec3f(0.15, 0.20, 0.35);
+                let groundAmbient = vec3f(0.05, 0.05, 0.08);
+                
+                let heightFactor = clamp(center.y / 8.0, 0.0, 1.0);
+                let baseAmbient = mix(groundAmbient, skyAmbient, vec3f(heightFactor));
+                
+                // FIXED: Multiply intensity by 0.35 to prevent overburn
+                let directLight = uniform.uSunColor * (max(0.0, uniform.uSunIntensity) * 0.35);
+                let totalLight = baseAmbient + directLight;
+                
+                *color = vec4f((*color).rgb * totalLight, (*color).a);
+            }
+        `;
+    }
+
+    for (var i = 0; i < gsplats.length; i++) {
+        var material = gsplats[i].material;
+        if (material) {
+            material.getShaderChunks(shaderLanguage).set('gsplatModifyVS', customShader);
+            material.update();
+            material.setParameter('uSunColor', [1.0, 1.0, 1.0]);
+            material.setParameter('uSunIntensity', 1.0);
+        }
+    }
+};
+
+SunRevolveControllerHTML.prototype.updateSunPosition = function(sliderValue) {
+    // Use Sine waves for a natural, domed celestial arc
+    var sunArc = sliderValue * Math.PI; // 0 = sunrise, PI/2 = noon, PI = sunset
+    var elevation = Math.sin(sunArc);   // Beautiful 0 -> 1 -> 0 curve
+    
+    // Calculate circular orbit mapped to the arc
+    var radians = (sliderValue * 180 + 180) * (Math.PI / 180); // Start East, go West
+    var xPos = Math.cos(radians) * this.orbitRadius;
+    var zPos = Math.sin(radians) * this.orbitRadius;
+    
+    // Y position smoothly curves up and down
+    var yPos = Math.max(elevation * this.orbitRadius * 0.8, 1.0); 
+    
+    this.entity.setPosition(xPos, yPos, zPos);
+    this.entity.lookAt(new pc.Vec3(0, 1, 0));
+    
+    this.updateLightProperties(elevation);
+    this.updateSliderUI(sliderValue, elevation);
+};
+
+// Update cinematic lighting and sync to GSplats
+SunRevolveControllerHTML.prototype.updateLightProperties = function(elevation) {
+    if (!this.entity.light || !this.autoIntensity) return;
+    
+    var light = this.entity.light;
+    
+    // Intensity follows the sine curve naturally, fading out perfectly at the horizon
+    light.intensity = Math.max(0.05, elevation * 2.8);
+    
+    // Exponential curve for color blending (keeps the sunset orange around slightly longer)
+    var colorBlend = Math.pow(elevation, 0.6); 
+    
+    // Smoothly interpolate between our Twilight and Noon colors
+    light.color.lerp(SunRevolveControllerHTML.TWILIGHT_COLOR, SunRevolveControllerHTML.NOON_COLOR, colorBlend);
+
+    // Sync to GSplats
+    var gsplats = this.app.root.findComponents('gsplat');
+    for (var i = 0; i < gsplats.length; i++) {
+        var material = gsplats[i].material;
+        if (material) {
+            material.setParameter('uSunColor', [light.color.r, light.color.g, light.color.b]);
+            material.setParameter('uSunIntensity', light.intensity);
+        }
+    }
+};
+
+// --- UI AND INPUT LOGIC ---
+
+SunRevolveControllerHTML.prototype.onSliderChanged = function(value) {
+    this.currentSunPosition = value;
+    this.updateSunPosition(value);
+};
+
+SunRevolveControllerHTML.prototype.createHTMLUI = function() {
+    this.uiContainer = document.createElement('div');
+    this.uiContainer.id = 'sun-control-ui';
+    this.uiContainer.style.cssText = `
+        position: absolute; bottom: 20px; left: 20px;
+        background: rgba(10, 15, 25, 0.85); backdrop-filter: blur(5px);
+        color: white; padding: 15px; border-radius: 12px;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        min-width: 400px; z-index: 1000; border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+    `;
+    
+    const title = document.createElement('div');
+    title.textContent = '☀️ ENVIRONMENTAL LIGHTING';
+    title.style.cssText = `font-size: 14px; font-weight: 600; text-align: center; color: #E2E8F0; letter-spacing: 1px;`;
+    
+    const sliderContainer = document.createElement('div');
+    sliderContainer.style.cssText = `margin: 20px 0 10px 0;`;
+    
+    this.slider = document.createElement('input');
+    this.slider.type = 'range'; this.slider.min = '0'; this.slider.max = '100'; this.slider.value = '50';
+    this.slider.style.cssText = `width: 100%; height: 6px; border-radius: 3px; background: #334155; outline: none; -webkit-appearance: none; cursor: pointer;`;
+    
+    this.slider.addEventListener('input', (e) => this.onSliderChanged(parseInt(e.target.value) / 100));
+    
+    this.positionLabel = document.createElement('div');
+    this.positionLabel.style.cssText = `font-size: 16px; font-weight: bold; text-align: center; margin: 15px 0 5px 0;`;
+    
+    const timeLabels = document.createElement('div');
+    timeLabels.style.cssText = `display: flex; justify-content: space-between; font-size: 11px; font-weight: bold; color: #94A3B8; margin-top: 8px; text-transform: uppercase;`;
+    timeLabels.innerHTML = `<span>Sunrise</span><span>Noon</span><span>Sunset</span>`;
+    
+    sliderContainer.appendChild(this.slider);
+    sliderContainer.appendChild(timeLabels);
+    
+    this.uiContainer.appendChild(title);
+    this.uiContainer.appendChild(this.positionLabel);
+    this.uiContainer.appendChild(sliderContainer);
+    
+    document.body.appendChild(this.uiContainer);
+    
+    const style = document.createElement('style');
+    style.textContent = `
+        #sun-control-ui input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+            background: #FFF; border: 2px solid #CBD5E1; box-shadow: 0 2px 5px rgba(0,0,0,0.5); cursor: pointer;
+        }
+    `;
+    document.head.appendChild(style);
+};
+
+SunRevolveControllerHTML.prototype.updateSliderUI = function(timeOfDay, elevation) {
+    if (!this.positionLabel) return;
+    
+    var positionText, color;
+    if (timeOfDay < 0.15)      { positionText = "Early Morning"; color = "#FB923C"; }
+    else if (timeOfDay < 0.4)  { positionText = "Morning"; color = "#FCD34D"; }
+    else if (timeOfDay < 0.6)  { positionText = "Midday"; color = "#FEF08A"; }
+    else if (timeOfDay < 0.85) { positionText = "Late Afternoon"; color = "#FCD34D"; }
+    else                       { positionText = "Dusk"; color = "#FB923C"; }
+    
+    this.positionLabel.textContent = positionText;
+    this.positionLabel.style.color = color;
+    
+    var gradientCenter = (timeOfDay * 100).toFixed(0);
+    this.slider.style.background = `linear-gradient(to right, #EA580C 0%, #FBBF24 ${gradientCenter}%, #EA580C 100%)`;
+};
+
+SunRevolveControllerHTML.prototype.destroy = function() {
+    if (this.uiContainer && this.uiContainer.parentNode) this.uiContainer.parentNode.removeChild(this.uiContainer);
+};
+
+SunRevolveControllerHTML.prototype.update = function(dt) {
+    if (!this.app.keyboard) return;
+    var speed = 0.005;
+    if (this.app.keyboard.isPressed(pc.KEY_LEFT)) {
+        this.slider.value = Math.max(0, this.currentSunPosition - speed) * 100;
+        this.onSliderChanged(this.slider.value / 100);
+    }
+    if (this.app.keyboard.isPressed(pc.KEY_RIGHT)) {
+        this.slider.value = Math.min(1, this.currentSunPosition + speed) * 100;
+        this.onSliderChanged(this.slider.value / 100);
+    }
+};
